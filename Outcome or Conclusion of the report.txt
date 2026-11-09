@@ -1,0 +1,14 @@
+Growth: Total payment value went from ₹1.62T (2018) to ₹64.27T (2022). Value YoY was +287%, +133%, +136% and +86% for 2019 to 2022. Count YoY was +278%, +95%, +142% and +104%. The 2018 to 2022 CAGR is about 151% for value and about 146% for count. Growth is decelerating, and the 2018 base is small, so show a 2019 to 2022 CAGR as well (roughly 117% for value).
+Ticket size: Avg ticket rose from ₹1,503 (2018) to ₹1,836 (2020), then fell to ₹1,635 (2022).
+Users: Registered users grew from 102M (Q4 2018) to 434M (Q4 2022), about 43% a year, and +23.6% in 2022. Q4 2022 shows roughly 27.7 transactions per registered user.
+Mix in 2022: Merchant payments are 52.7% of transactions but 18.6% of value. Peer-to-peer is 38.2% of transactions but 77.9% of value.
+Top states by value in 2022: Telangana ₹9.31T, Maharashtra ₹7.85T, Karnataka ₹7.00T, Andhra Pradesh ₹5.58T, Rajasthan ₹4.87T. Telangana’s 2018 to 2022 CAGR is the highest, at about 198%.
+Top districts by value in 2022: Hyderabad ₹4.78T, Bengaluru Urban ₹3.87T, Pune ₹2.27T, Jaipur ₹2.13T.
+
+Telangana ranking above Maharashtra on value while Maharashtra leads on transaction count over the full period suggests a high average ticket there. Add a state avg-ticket view and sanity-check it against Pulse.
+
+9. Validation checklist
+Total amount per year in the dashboard matches the figures above.
+The Registered Users KPI for 2022 shows 433,946,553, and the same number for Q4 whether you view the year or the quarter.
+State count shows 36, and the district count is 723 once the districts are keyed on State + District.
+No state is blank on the map. If some are, fix name mismatches first (Ladakh, Telangana and the merged Dadra and Nagar Haveli and Daman and Diu are the usual ones).
