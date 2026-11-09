@@ -1,0 +1,139 @@
+// ============================================================================
+// PhonePe Pulse - Power BI measures, tables and dropdown logic
+// Table names assume Stage 1: Fact_MapTxn, Fact_MapUser, Fact_AggTxn, Fact_AggUser,
+// Dim_State, Dim_District, Dim_Period, Dim_TransType, Dim_Brand.
+// Create each item with: Modeling > New measure / New table / New column.
+// NOTE: written and logic-checked, but not run inside Power BI Desktop here.
+// Validate with the checks at the bottom of this file.
+// ============================================================================
+
+// ---------- 0. One calculated column on Dim_District (unique, readable label) ----------
+// Modeling > New column (select Dim_District first)
+District Label = Dim_District[District] & " (" & Dim_District[State] & ")"
+
+// ---------- 1. Base KPIs (built on the map tables: they carry district AND state) ----------
+Total Transactions = SUM(Fact_MapTxn[trans_counts])
+Total Amount       = SUM(Fact_MapTxn[amount])
+Avg Ticket         = DIVIDE([Total Amount], [Total Transactions])
+
+// Registered users are cumulative snapshots: take the LAST quarter in the current selection
+Registered Users =
+VAR lastP = MAX(Dim_Period[period_key])
+RETURN CALCULATE(SUM(Fact_MapUser[registered_user_counts]), Dim_Period[period_key] = lastP)
+
+// Engagement proxy (yearly grain = transactions in the year / year-end users; quarterly grain = per quarter)
+Txns per User = DIVIDE([Total Transactions], [Registered Users])
+
+// Measures that need the transaction-type / brand tables
+Agg Transactions = SUM(Fact_AggTxn[trans_counts])
+Agg Amount       = SUM(Fact_AggTxn[amount])
+
+// Brand data ends 2022 Q1, so use the last period that HAS brand rows in the current selection
+Brand Users =
+VAR lastP = MAX(Fact_AggUser[period_key])
+RETURN CALCULATE(SUM(Fact_AggUser[user_counts]), Fact_AggUser[period_key] = lastP)
+
+// ---------- 2. Growth ----------
+Amount PY =
+VAR y = MAX(Dim_Period[Year])
+RETURN CALCULATE([Total Amount],
+    FILTER(ALL(Dim_Period), Dim_Period[Year] = y - 1 && Dim_Period[Quarter] IN VALUES(Dim_Period[Quarter])))
+
+Amount YoY % = DIVIDE([Total Amount] - [Amount PY], [Amount PY])
+
+Transactions PY =
+VAR y = MAX(Dim_Period[Year])
+RETURN CALCULATE([Total Transactions],
+    FILTER(ALL(Dim_Period), Dim_Period[Year] = y - 1 && Dim_Period[Quarter] IN VALUES(Dim_Period[Quarter])))
+
+Transactions YoY % = DIVIDE([Total Transactions] - [Transactions PY], [Transactions PY])
+
+// QoQ only makes sense when exactly one quarter is in context
+Amount QoQ % =
+IF(
+    HASONEVALUE(Dim_Period[period_key]),
+    VAR p    = MAX(Dim_Period[period_key])
+    VAR prev = CALCULATE(MAX(Dim_Period[period_key]), FILTER(ALL(Dim_Period), Dim_Period[period_key] < p))
+    VAR prevAmt = CALCULATE([Total Amount], REMOVEFILTERS(Dim_Period), Dim_Period[period_key] = prev)
+    RETURN DIVIDE([Total Amount] - prevAmt, prevAmt)
+)
+
+Amount CAGR % =
+VAR y0 = CALCULATE(MIN(Dim_Period[Year]), ALLSELECTED(Dim_Period))
+VAR y1 = CALCULATE(MAX(Dim_Period[Year]), ALLSELECTED(Dim_Period))
+VAR v0 = CALCULATE([Total Amount], REMOVEFILTERS(Dim_Period), Dim_Period[Year] = y0)
+VAR v1 = CALCULATE([Total Amount], REMOVEFILTERS(Dim_Period), Dim_Period[Year] = y1)
+RETURN IF(y1 > y0 && v0 > 0, DIVIDE(v1, v0) ^ (1 / (y1 - y0)) - 1)
+
+// ============================================================================
+// 3. DROPDOWN TABLES (Modeling > New table). Do NOT relate these to anything.
+//    Show each as a slicer with Style = Dropdown.
+// ============================================================================
+Metric Selector = DATATABLE("Metric", STRING,
+    {{"Transactions"}, {"Payment Value"}, {"Avg Ticket"}, {"Registered Users"}, {"Txns per User"}, {"YoY Growth"}})
+
+Top N      = GENERATESERIES(5, 20, 5)
+
+Rank Order = DATATABLE("Order", STRING, {{"Top"}, {"Bottom"}})
+
+Growth Basis = DATATABLE("Basis", STRING, {{"YoY"}, {"QoQ"}, {"CAGR"}})
+
+Map Level  = DATATABLE("Level", STRING, {{"State"}, {"District"}})
+
+// Time grain dropdown = a FIELD PARAMETER, made in the UI:
+//   Modeling > New parameter > Fields > add Dim_Period[Year] and Dim_Period[Period]; name it "Time Axis".
+//   Use "Time Axis" as the X-axis of native trend visuals (Python visuals cannot use it).
+
+// ---------- 4. Measures that read the dropdowns ----------
+Selected Metric Label = SELECTEDVALUE('Metric Selector'[Metric], "Payment Value")
+
+Selected Metric =
+SWITCH(
+    [Selected Metric Label],
+    "Transactions",     [Total Transactions],
+    "Payment Value",    [Total Amount],
+    "Avg Ticket",       [Avg Ticket],
+    "Registered Users", [Registered Users],
+    "Txns per User",    [Txns per User],
+    "YoY Growth",       [Amount YoY %]
+)
+
+Top N Value         = SELECTEDVALUE('Top N'[Value], 10)
+Rank Order Selected = SELECTEDVALUE('Rank Order'[Order], "Top")
+
+Selected Growth =
+SWITCH(
+    SELECTEDVALUE('Growth Basis'[Basis], "YoY"),
+    "YoY",  [Amount YoY %],
+    "QoQ",  [Amount QoQ %],
+    "CAGR", [Amount CAGR %]
+)
+
+// Map toggle: put [State Map Value] on the filled map and [District Map Value] on the bubble map
+State Map Value    = IF(SELECTEDVALUE('Map Level'[Level], "State") = "State",    [Selected Metric])
+District Map Value = IF(SELECTEDVALUE('Map Level'[Level], "State") = "District", [Selected Metric])
+
+// ---------- 5. Dynamic Top N / Bottom N (use as a VISUAL-LEVEL filter: Show in Top N = 1) ----------
+// RANKX order must be fixed (ASC/DESC), so Bottom N flips the sign of the metric instead.
+// RANKX runs over the WHOLE dimension table so the visual's own row filter does not collapse the rank.
+Rank by Metric (State) =
+RANKX(ALLSELECTED(Dim_State), [Selected Metric] * IF([Rank Order Selected] = "Bottom", -1, 1), , DESC, DENSE)
+
+Show in Top N (State) = IF([Rank by Metric (State)] <= [Top N Value], 1, 0)
+
+Rank by Metric (District) =
+RANKX(ALLSELECTED(Dim_District), [Selected Metric] * IF([Rank Order Selected] = "Bottom", -1, 1), , DESC, DENSE)
+
+Show in Top N (District) = IF([Rank by Metric (District)] <= [Top N Value], 1, 0)
+
+// ---------- 6. Dynamic titles (Visual > Title > fx > Field value) ----------
+Title Top State  = [Rank Order Selected] & " " & [Top N Value] & " states by " & [Selected Metric Label]
+Title Top District = [Rank Order Selected] & " " & [Top N Value] & " districts by " & [Selected Metric Label]
+
+// ============================================================================
+// VALIDATION (no filters applied): a table of Year x [Total Amount] must show
+//   2018 1,623,045,396,414 | 2019 6,276,688,133,189 | 2020 14,641,161,978,061
+//   2021 34,598,699,687,166 | 2022 64,266,332,910,905
+// [Registered Users] for Year=2022 must be 433,946,553.
+// [Amount YoY %] for 2022 must be about 85.7%. [Amount CAGR %] (all years) about 150.8%.
+// ============================================================================
